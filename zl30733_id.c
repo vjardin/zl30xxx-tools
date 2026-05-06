@@ -38,7 +38,9 @@
 
 /* Identity block (page 0) */
 #define ZL_REG_ID                 0x0001  // u16, big-endian: Chip ID / family
-#define ZL_REG_REVISION           0x0003  // u16, big-endian
+#define ZL_REG_REVISION           0x0003  // u8: single-byte stepping code (default 0x03 per
+                                          //     DS20006552M page-0 map). Reading 2 bytes here
+                                          //     pulls in the next register and prints garbage.
 #define ZL_REG_FW_VER             0x0005  // u16, big-endian
 #define ZL_REG_CUSTOM_CONFIG_VER  0x0007  // u32, big-endian
 
@@ -116,8 +118,7 @@ spi_read(int fd, uint8_t reg_off, uint8_t *buf, size_t len)
 	goto fini;
     }
 
-    tx[0] = reg_off;
-    //memset(tx + 1, 0x00, len);
+    tx[0] = 0x80 | (reg_off & 0x7F);
 
     struct spi_ioc_transfer xfer = {
         .tx_buf = (unsigned long)tx,
@@ -250,7 +251,8 @@ main(int argc, char **argv)
     if (ioctl(fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed_hz) == -1)
         err(EXIT_FAILURE, "SPI_IOC_WR_MAX_SPEED_HZ(%u)", speed_hz);
 
-    uint16_t chip_id, revision, fw_ver;
+    uint16_t chip_id, fw_ver;
+    uint8_t revision;
     uint32_t cfg_ver;
 
 #define ZL_READ_REG(FD, REG, OUTVAR, LEN) do { \
@@ -276,14 +278,14 @@ main(int argc, char **argv)
 } while (0)
 
     ZL_READ_REG(fd, ZL_REG_ID, chip_id, 2);
-    ZL_READ_REG(fd, ZL_REG_REVISION, revision, 2);
+    ZL_READ_REG(fd, ZL_REG_REVISION, revision, 1);
     ZL_READ_REG(fd, ZL_REG_FW_VER, fw_ver, 2);
     ZL_READ_REG(fd, ZL_REG_CUSTOM_CONFIG_VER, cfg_ver, 4);
 
     /* done, print it */
     printf("ZL3073x identity via %s\n", devnode);
     printf("  Chip ID              : 0x%04X  (%s)\n", chip_id, lookup_name(chip_id));
-    printf("  Revision             : 0x%04X  (major=%u minor=%u)\n",
+    printf("  Revision             : 0x%02X  (major=%u minor=%u)\n",
            revision, (revision >> 4) & 0xF, revision & 0xF);
     printf("  Firmware Version     : 0x%04X\n", fw_ver);
     printf("  Custom Config Version: 0x%08X\n", cfg_ver);

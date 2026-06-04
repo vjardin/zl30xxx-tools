@@ -53,6 +53,7 @@ static struct id_map {
     { .id = 0x0E95, .name = "ZL3073x (A)" },
     { .id = 0x1E95, .name = "ZL3073x (B)" },
     { .id = 0x2E95, .name = "ZL3073x (C)" },
+    { .id = 0x0E3B, .name = "ZL30643" },
 };
 
 static const char *devnode = "/dev/spidev0.0";

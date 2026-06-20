@@ -1,15 +1,40 @@
-# ZL70XXX-tools
+# ZL30xxx-tools
 
-This tool is aimed at testing the DPLL over SPI bus with some basic readings.
+Tools for testing and inspecting a Microchip (ex-Microsemi) ZL3073x family DPLL
+(network synchronizer) over the Linux `spidev` bus.
+
+| tool | purpose |
+|------|---------|
+| `zl30733_id`   | quick identity / revision / firmware / config-version read over a raw `/dev/spidevX.Y` |
+| `zl3073x-dump` | full configuration dump + decode + integrity check (mailbox walk over every reference / DPLL / synth / output), text and JSON output; manages the in-kernel `zl3073x-spi` driver bind itself. See **zl3073x-dump(1)**. |
 
 ## Compile
 
-Either you cross compile it with Buildroot or locally using:
+Either cross compile with Buildroot, or locally / standalone-cross with:
 ```
-$ make
+$ make                                   # native build
+$ make CROSS_COMPILE=aarch64-linux-gnu-  # standalone cross build
+$ make STATIC=1                          # static link (e.g. for an initramfs)
+$ make man                               # build the man page(s) (needs pandoc)
+$ make install install-man PREFIX=/usr/local
 ```
 
 ## Usage
+
+### zl3073x-dump
+
+```
+zl3073x-dump                         # decoded text report to stdout
+zl3073x-dump -j /tmp/dpll.json       # structured JSON (refs/dplls/synths/outputs + register_map)
+zl3073x-dump -k -j golden.json       # capture a golden config (keeps spidev bound)
+man ./zl3073x-dump.1                  # full manual, incl. PTP/SyncE examples
+```
+
+The man page documents the integrity-check workflow (golden capture/compare via
+`stable_cfg_crc32`) and how the dumped references/synths/outputs map onto a
+PTP (IEEE 1588) / Synchronous Ethernet deployment.
+
+### zl30733_id
 
 Example:
 ```

@@ -1,18 +1,28 @@
 # Usage (native):           make
 # Usage (cross, Buildroot): make CROSS_COMPILE=aarch64-linux-gnu-
 # Static build (optional):  make STATIC=1
-# Install locally:          make install PREFIX=/usr/local
+# Build the man pages:      make man        (needs pandoc)
+# Install locally:          make install install-man PREFIX=/usr/local
 # Install to sysroot:       make install DESTDIR=$(TARGET_DIR) PREFIX=/usr
 # Verbose output:           make V=1
 
-# Toolchain selection (Buildroot sets CROSS_COMPILE, CC, etc. automatically)
-CC      ?= $(CROSS_COMPILE)gcc
-STRIP   ?= $(CROSS_COMPILE)strip
-AR      ?= $(CROSS_COMPILE)ar
+ifeq ($(origin CC),default)
+  CC    := $(CROSS_COMPILE)gcc
+endif
+ifeq ($(origin STRIP),default)
+  STRIP := $(CROSS_COMPILE)strip
+endif
+ifeq ($(origin AR),default)
+  AR    := $(CROSS_COMPILE)ar
+endif
 
-PROG    := zl30733_id
-SRC     := zl30733_id.c
-OBJ     := $(SRC:.c=.o)
+# Programs: one self-contained C source per tool.
+PROGS   := zl30733_id zl3073x-dump
+
+# Man pages generated from <name>.<section>.md via pandoc.
+MANSRC  := zl3073x-dump.1.md
+MANPAGES:= $(MANSRC:.md=)
+PANDOC  ?= pandoc
 
 CPPFLAGS ?=
 CFLAGS   ?= -O0 -g -Wall -Wextra -Wformat=2 -Wshadow -Wundef
@@ -25,8 +35,10 @@ endif
 
 PREFIX  ?= /usr/local
 BINDIR  ?= $(PREFIX)/bin
+MANDIR  ?= $(PREFIX)/share/man
 INSTALL ?= install
 MODE_BIN?= 0755
+MODE_DOC?= 0644
 
 ifeq ($(V),1)
   Q :=
@@ -34,31 +46,53 @@ else
   Q := @
 endif
 
-.PHONY: all clean install uninstall strip
+.PHONY: all man clean install install-man uninstall strip
 
-all: $(PROG)
+# Binaries build by default; man pages need pandoc, so build them on demand
+# (or via `install-man`).
+all: $(PROGS)
 
-$(PROG): $(OBJ)
-	@echo "  LD      $@"
-	$(Q)$(CC) $(LDFLAGS) -o $@ $^ $(LDLIBS)
+man: $(MANPAGES)
 
-%.o: %.c
-	@echo "  CC      $<"
-	$(Q)$(CC) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
+# Single-file tools: link straight from the matching <prog>.c (no .o kept).
+# The stem is the same for both the underscore and the hyphen binaries.
+zl30733_id:   zl30733_id.c
+zl3073x-dump: zl3073x-dump.c
 
-strip: $(PROG)
-	@echo "  STRIP   $<"
-	$(Q)$(STRIP) $(PROG)
+$(PROGS):
+	@echo "  CCLD    $@"
+	$(Q)$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -o $@ $< $(LDLIBS)
 
-install: $(PROG)
-	@echo "  INSTALL $(DESTDIR)$(BINDIR)/$(PROG)"
+# man page: <name>.<section> from <name>.<section>.md
+%.1: %.1.md
+	@echo "  PANDOC  $@"
+	$(Q)$(PANDOC) -s -t man $< -o $@
+
+strip: $(PROGS)
+	@echo "  STRIP   $(PROGS)"
+	$(Q)$(STRIP) $(PROGS)
+
+install: $(PROGS)
+	@echo "  INSTALL $(DESTDIR)$(BINDIR)/ <- $(PROGS)"
 	$(Q)$(INSTALL) -d "$(DESTDIR)$(BINDIR)"
-	$(Q)$(INSTALL) -m $(MODE_BIN) "$(PROG)" "$(DESTDIR)$(BINDIR)/$(PROG)"
+	$(Q)for p in $(PROGS); do \
+		$(INSTALL) -m $(MODE_BIN) "$$p" "$(DESTDIR)$(BINDIR)/$$p"; \
+	done
+
+# Install man pages (depends on `man` so pandoc runs first).
+install-man: man
+	@echo "  INSTALL $(DESTDIR)$(MANDIR)/manN/ <- $(MANPAGES)"
+	$(Q)for m in $(MANPAGES); do \
+		sec=$${m##*.}; \
+		$(INSTALL) -d "$(DESTDIR)$(MANDIR)/man$$sec"; \
+		$(INSTALL) -m $(MODE_DOC) "$$m" "$(DESTDIR)$(MANDIR)/man$$sec/$$m"; \
+	done
 
 uninstall:
-	@echo "  RM      $(DESTDIR)$(BINDIR)/$(PROG)"
-	$(Q)rm -f "$(DESTDIR)$(BINDIR)/$(PROG)"
+	@echo "  RM      binaries + man pages"
+	$(Q)for p in $(PROGS); do rm -f "$(DESTDIR)$(BINDIR)/$$p"; done
+	$(Q)for m in $(MANPAGES); do sec=$${m##*.}; rm -f "$(DESTDIR)$(MANDIR)/man$$sec/$$m"; done
 
 clean:
 	@echo "  CLEAN"
-	$(Q)rm -f $(OBJ) $(PROG)
+	$(Q)rm -f $(PROGS) $(MANPAGES) *.o

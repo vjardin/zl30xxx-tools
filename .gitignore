@@ -1,0 +1,7 @@
+# Build artefacts (produced by `make`; not checked in)
+zl30733_id
+zl3073x-dump
+*.o
+
+# Generated man pages (built from *.md by `make man`)
+zl3073x-dump.1

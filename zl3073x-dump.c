@@ -26,6 +26,7 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/file.h>
 #include <errno.h>
 #include <err.h>
 #include <signal.h>
@@ -35,6 +36,10 @@
 
 #define ZL_CMD_READ	0x80u
 #define ZL_PAGE_SEL	0x7Fu
+#define ZL_LOCK_FILE	"/var/lock/zl3073x-spidev.lock"
+#define ZL_LOCK_FILE2	"/tmp/zl3073x-spidev.lock"
+static int	lock_fd		= -1;
+static bool	force_lock	= false;
 #define ZL_EXPECT_ID	0x0E95u
 #define ZL_MB_SEM_RD	0x02u		/* BIT(1) - trigger window read */
 
@@ -103,9 +108,24 @@ static int grab_spidev(void)
 	spidev_bound = true;
 	return 0;
 }
+static int take_lock(void)
+{
+	const char *path = ZL_LOCK_FILE;
+	lock_fd = open(ZL_LOCK_FILE, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+	if (lock_fd < 0) { path = ZL_LOCK_FILE2; lock_fd = open(ZL_LOCK_FILE2, O_RDWR | O_CREAT | O_CLOEXEC, 0644); }
+	if (lock_fd < 0) { warn("lock file"); return force_lock ? 0 : -1; }
+	if (flock(lock_fd, LOCK_EX | LOCK_NB) == 0) return 0;
+	if (!force_lock) {
+		warnx("another process holds the ZL3073x (%s)", path);
+		return -1;
+	}
+	warnx("lock held by another process: going on (-F), each access flock()ed");
+	return 0;
+}
 static int open_spidev(void)
 {
 	unsigned bus, cs; char dev[40];
+	if (take_lock()) return -1;
 	if (sscanf(spidev_name, "spi%u.%u", &bus, &cs) != 2) { warnx("bad spi name '%s' (want spiB.C)", spidev_name); return -1; }
 	snprintf(dev, sizeof(dev), "/dev/spidev%u.%u", bus, cs);
 	for (int i = 0; i < 50 && spi_fd < 0; i++) { spi_fd = open(dev, O_RDWR); if (spi_fd < 0) usleep(20000); }
@@ -144,13 +164,19 @@ static int zl_page(int page) { uint8_t p = page; return zl_write_off(ZL_PAGE_SEL
 /* big-endian register read at raw 16-bit address (page<<7 | offset) */
 static int zl_rd(uint16_t addr, uint8_t *buf, int len)
 {
+	(void)flock(spi_fd, LOCK_EX);
 	int rc = zl_page(addr >> 7);
-	return rc ? rc : zl_read_off(addr & 0x7F, buf, len);
+	if (!rc) rc = zl_read_off(addr & 0x7F, buf, len);
+	(void)flock(spi_fd, LOCK_UN);
+	return rc;
 }
 static int zl_wr(uint16_t addr, const uint8_t *data, int len)
 {
+	(void)flock(spi_fd, LOCK_EX);
 	int rc = zl_page(addr >> 7);
-	return rc ? rc : zl_write_off(addr & 0x7F, data, len);
+	if (!rc) rc = zl_write_off(addr & 0x7F, data, len);
+	(void)flock(spi_fd, LOCK_UN);
+	return rc;
 }
 static uint64_t be(const uint8_t *b, int n) { uint64_t v = 0; for (int i = 0; i < n; i++) v = (v << 8) | b[i]; return v; }
 static int rd_val(uint16_t addr, int size, uint64_t *out)
@@ -352,6 +378,7 @@ static void usage(const char *a0)
 	"  -s hz     SPI clock (default 5M)    -p N     register pages to CRC (def 15)\n"
 	"  -r passes / -w ms   volatile-detection sampling (default 8 / 300ms)\n"
 	"  -n  assume spidev already bound    -k  leave spidev bound on exit\n"
+	"  -F  run even while another process holds the chip's lock\n"
 	"golden-CRC compare (avoid a driver re-probe in between):\n"
 	"  %s -k -j golden.json ; %s -n -j now.json   # then diff stable_cfg_crc32\n",
 	a0, a0, a0);
@@ -361,7 +388,8 @@ int main(int argc, char **argv)
 {
 	const char *textpath = NULL, *jsonpath = NULL;
 	int c;
-	while ((c = getopt(argc, argv, "o:j:d:D:s:p:r:w:nkh")) != -1) switch (c) {
+	while ((c = getopt(argc, argv, "o:j:d:D:s:p:r:w:nkFh")) != -1) switch (c) {
+		case 'F': force_lock = true; break;
 		case 'o': textpath = optarg; break;
 		case 'j': jsonpath = optarg; break;
 		case 'd': snprintf(spidev_name, sizeof(spidev_name), "%s", optarg); break;

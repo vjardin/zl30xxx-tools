@@ -433,6 +433,12 @@ int main(int argc, char **argv)
 			for (int off = 0; off < 0x7F; off++) if (tmp[off] != snap[pg][off]) volm[pg][off] = 1;
 		}
 	}
+	for (int off = 0x40; off <= 0x45; off++) volm[0][off] = 1;
+	for (int pg = 0; pg < npages; pg++) volm[pg][0x7E] = 1;
+	for (int pg = 2; pg <= 3 && pg < npages; pg++) memset(volm[pg], 1, 0x7F);
+	for (int pg = 6; pg <= 7 && pg < npages; pg++) memset(volm[pg], 1, 0x7F);
+	for (int pg = 10; pg < npages; pg++) if (pg != 11) memset(volm[pg], 1, 0x7F);
+	if (npages > 9) for (int off = 0x1E; off <= 0x26; off++) volm[9][off] = 1;
 	uint32_t wcrc = 0, scrc = 0;
 	int stable = 0, total = 0, nvol = 0;
 	for (int pg = 0; pg < npages; pg++) {

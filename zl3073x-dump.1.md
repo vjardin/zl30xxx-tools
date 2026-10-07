@@ -48,7 +48,9 @@ The tool reads three things:
 *The raw register map.*
 : The live register pages are emitted as a hex `register_map` so a dump can be
   byte-diffed against a known-good ("golden") capture, plus a repeatable
-  **stable-cfg CRC32** that excludes free-running status bytes.
+  **stable-cfg CRC32** that excludes free-running status bytes, and a
+  **mailbox-cfg CRC32** over the per-instance configuration that the
+  mailboxes hold.
 
 ## What it can and cannot read
 
@@ -135,6 +137,7 @@ ZL3073x DPLL config dump (spi0.0)
   id 0x0e95 (ZL30733)  rev 0x03  fw 178a  custom_config_ver 0xffffffff (BLANK)
   ready=1  cfg_invalid=0  booted config slot AC=0
   stable-cfg CRC32 0x18e9ff57 (1902/1905 static)   whole-map CRC32 0x25666f35 (3 volatile)
+  mailbox-cfg CRC32 0x5d0c41e7 (29 instances, 1481 bytes)
 
 ref (10 instances):
   [ 2] freq_base=10000 freq_mult=12500 ... => 125000000 Hz
@@ -161,7 +164,8 @@ DPLL's number: 0, 1, 2 and 5 on a ZL30733. `dplls` carry the raw `bw_fixed`
 and `bw_var` and the decoded `loop_bw_hz` (`null` for the reserved code) and
 `loop_bw_mode` (`fixed`, `variable` or `reserved`). The `integrity` object holds
 `chip_id_ok`, `ready`, `cfg_invalid`, `config_slot`, `stable_cfg_crc32`,
-`whole_map_crc32`, and the byte counts. `register_map` is `{pages, page_bytes,
+`whole_map_crc32`, the byte counts, `mailbox_cfg_crc32`, `mailbox_instances`
+and `mailbox_bytes`. `register_map` is `{pages, page_bytes,
 hex[]}` with one lowercase-hex string per page (254 chars = 127 bytes).
 
 # EXIT STATUS
@@ -235,7 +239,8 @@ the state:
 zl3073x-dump -k -j /etc/dpll/golden.json
 ```
 
-Record the `stable_cfg_crc32` and archive `golden.json` as the site reference.
+Record the `stable_cfg_crc32` and the `mailbox_cfg_crc32`, and archive
+`golden.json` as the site reference.
 
 ## Verify a field unit against the golden capture
 
@@ -245,8 +250,8 @@ with **-n** and compare. To restore the DPLL driver afterwards, unbind spidev:
 ```sh
 zl3073x-dump -n -j /tmp/now.json
 
-# compare the integrity fingerprint
-jq -r .integrity.stable_cfg_crc32 /etc/dpll/golden.json /tmp/now.json
+# compare the integrity fingerprint: both CRCs
+jq -r '.integrity | .stable_cfg_crc32, .mailbox_cfg_crc32' /etc/dpll/golden.json /tmp/now.json
 
 # or a full field-level diff of the decoded configuration
 diff <(jq -S 'del(.integrity.whole_map_crc32)' /etc/dpll/golden.json) \
@@ -258,8 +263,8 @@ echo ''     > /sys/bus/spi/devices/spi0.0/driver_override
 echo spi0.0 > /sys/bus/spi/drivers/zl3073x-spi/bind
 ```
 
-A matching `stable_cfg_crc32` is strong evidence the loaded configuration is
-byte-for-byte the golden one. Exclude `whole_map_crc32` from a strict diff — it
+A matching pair, `stable_cfg_crc32` and `mailbox_cfg_crc32`, is strong
+evidence the loaded configuration is byte-for-byte the golden one. Exclude `whole_map_crc32` from a strict diff — it
 includes free-running status registers and is expected to vary.
 
 ## List the PTP/SyncE output frequencies
@@ -314,12 +319,23 @@ There are two integrity signals, of different strength:
   programmed); this does *not* mean the config is empty or bad — only that you
   cannot use the tag and must fall back on the content checks below.
 
-**Strong / content — `stable_cfg_crc32` and `register_map`.**
-: A CRC over the configuration register bytes (free-running status bytes
-  excluded), and the raw hex map for a byte-level diff. Capture both on a golden
-  unit and compare. Because the kernel probe writes registers on each rebind,
-  always capture-then-compare with **-k**/**-n** so no re-probe falls between the
-  two reads.
+**Strong / content — `stable_cfg_crc32`, `mailbox_cfg_crc32` and `register_map`.**
+: `stable_cfg_crc32` is a CRC over the directly addressed configuration
+  registers (free-running status bytes excluded). It leaves out the four
+  mailbox pages (reference, DPLL, synthesizer and output windows), because a
+  window shows whichever instance was read last. So we are missing the
+  per-instance configuration: reference frequencies and monitors, DPLL
+  priorities, loop bandwidths and phase-slope limits, synthesizer frequencies,
+  output dividers.
+  `mailbox_cfg_crc32` covers those: each walked instance's window, from its first
+  configuration byte (offset 0x05, after the mask and the semaphore) to the
+  window's last register, in walk order and keyed by type and instance.
+  Use both together. Take them before any process changes the
+  configuration at run time (a PTP daemon steering a DPLL, for instance), or
+  compare captures taken in the same state. `register_map` is the raw hex map
+  for a byte-level diff. Capture all three on a golden unit and compare. Because
+  the kernel probe writes registers on each rebind, always capture-then-compare
+  with **-k**/**-n** so no re-probe falls between the two reads.
 
 **Device self-verdict — `cfg_invalid`.**
 : The on-chip boot loader sets `master_clk_status.cfg_invalid` if the flash

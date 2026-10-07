@@ -214,6 +214,7 @@ struct mbtype {
 	int count;
 	const struct field *f;
 	int nf;
+	int cfg_last;			/* the window's last configuration byte */
 };
 static const struct field ref_f[] = {		/* page 10 window */
 	{"freq_base",0x05,2}, {"freq_mult",0x07,2}, {"ratio_m",0x09,2}, {"ratio_n",0x0b,2},
@@ -234,15 +235,27 @@ static const struct field dpll_f[] = {		/* page 12 window */
 #define DPLL_F_BW_FIXED	5	/* indexes in dpll_f[] */
 #define DPLL_F_BW_VAR	6
 static const struct mbtype MB[] = {
-	{"ref",    10, 0x04, 0x02, NUM_REFS,   ref_f,   sizeof(ref_f)/sizeof(ref_f[0])},
-	{"dpll",   12, 0x04, 0x02, NUM_DPLLS,  dpll_f,  sizeof(dpll_f)/sizeof(dpll_f[0])},
-	{"synth",  13, 0x04, 0x02, NUM_SYNTHS, synth_f, sizeof(synth_f)/sizeof(synth_f[0])},
-	{"output", 14, 0x04, 0x02, NUM_OUTS,   out_f,   sizeof(out_f)/sizeof(out_f[0])},
+	{"ref",    10, 0x04, 0x02, NUM_REFS,   ref_f,   sizeof(ref_f)/sizeof(ref_f[0]),     0x3F},
+	{"dpll",   12, 0x04, 0x02, NUM_DPLLS,  dpll_f,  sizeof(dpll_f)/sizeof(dpll_f[0]),   0x6C},
+	{"synth",  13, 0x04, 0x02, NUM_SYNTHS, synth_f, sizeof(synth_f)/sizeof(synth_f[0]), 0x17},
+	{"output", 14, 0x04, 0x02, NUM_OUTS,   out_f,   sizeof(out_f)/sizeof(out_f[0]),     0x2A},
 };
 #define NMB (int)(sizeof(MB)/sizeof(MB[0]))
 #define MAXF 8
 
 static uint64_t mbval[NMB][NUM_OUTS][MAXF];	/* [type][instance][field] */
+
+#define MB_CFG_FIRST	0x05
+static uint32_t mb_cfg_crc;
+static int mb_cfg_instances, mb_cfg_bytes;
+
+static uint32_t mb_win_crc(uint32_t crc, int t, int inst, const uint8_t *win)
+{
+	uint8_t key[2] = { (uint8_t)t, (uint8_t)inst };
+
+	crc = crc32_upd(crc, key, 2);
+	return crc32_upd(crc, win + MB_CFG_FIRST, MB[t].cfg_last - MB_CFG_FIRST + 1);
+}
 
 /* select instance `inst` of mailbox `t` and read its window into mbval */
 static int mb_read(int t, int inst)
@@ -262,6 +275,12 @@ static int mb_read(int t, int inst)
 	for (int k = 0; k < m->nf; k++)
 		if (rd_val((m->page << 7) | m->f[k].off, m->f[k].size, &mbval[t][inst][k]))
 			return -1;
+
+	uint8_t win[0x80];
+	if (read_page(m->page, win)) return -1;
+	mb_cfg_crc = mb_win_crc(mb_cfg_crc, t, inst, win);
+	mb_cfg_instances++;
+	mb_cfg_bytes += m->cfg_last - MB_CFG_FIRST + 1;
 	return 0;
 }
 
@@ -336,6 +355,8 @@ static void emit_text(FILE *o, const struct id_blk *b, uint32_t scrc, uint32_t w
 		b->ready, b->cfg_invalid, b->gpio & 0x7);
 	fprintf(o, "  stable-cfg CRC32 0x%08x (%d/%d static)   whole-map CRC32 0x%08x (%d volatile)\n",
 		scrc, stable, total, wcrc, nvol);
+	fprintf(o, "  mailbox-cfg CRC32 0x%08x (%d instances, %d bytes)\n",
+		mb_cfg_crc, mb_cfg_instances, mb_cfg_bytes);
 
 	for (int t = 0; t < NMB; t++) {
 		const struct mbtype *m = &MB[t];
@@ -388,9 +409,11 @@ static void emit_json(FILE *o, const struct id_blk *b, uint32_t scrc, uint32_t w
 		b->cfgver == 0xffffffff ? "true" : "false");
 	fprintf(o, "  \"integrity\": {\"chip_id_ok\":%s,\"ready\":%s,\"cfg_invalid\":%s,"
 		"\"config_slot\":%u,\"stable_cfg_crc32\":\"0x%08x\",\"whole_map_crc32\":\"0x%08x\","
-		"\"static_bytes\":%d,\"total_bytes\":%d,\"volatile_bytes\":%d},\n",
+		"\"static_bytes\":%d,\"total_bytes\":%d,\"volatile_bytes\":%d,"
+		"\"mailbox_cfg_crc32\":\"0x%08x\",\"mailbox_instances\":%d,\"mailbox_bytes\":%d},\n",
 		b->id_ok ? "true" : "false", b->ready ? "true" : "false",
-		b->cfg_invalid ? "true" : "false", b->gpio & 0x7, scrc, wcrc, stable, total, nvol);
+		b->cfg_invalid ? "true" : "false", b->gpio & 0x7, scrc, wcrc, stable, total, nvol,
+		mb_cfg_crc, mb_cfg_instances, mb_cfg_bytes);
 
 	for (int t = 0; t < NMB; t++) {
 		const struct mbtype *m = &MB[t];

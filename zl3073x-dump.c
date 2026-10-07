@@ -128,7 +128,6 @@ static int take_lock(void)
 static int open_spidev(void)
 {
 	unsigned bus, cs; char dev[40];
-	if (take_lock()) return -1;
 	if (sscanf(spidev_name, "spi%u.%u", &bus, &cs) != 2) { warnx("bad spi name '%s' (want spiB.C)", spidev_name); return -1; }
 	snprintf(dev, sizeof(dev), "/dev/spidev%u.%u", bus, cs);
 	for (int i = 0; i < 50 && spi_fd < 0; i++) { spi_fd = open(dev, O_RDWR); if (spi_fd < 0) usleep(20000); }
@@ -494,6 +493,7 @@ int main(int argc, char **argv)
 	if (npages < 1 || npages > 15) errx(2, "npages must be 1..15");
 	if (!textpath && !jsonpath) textpath = "/dev/stdout";	/* default: text to stdout */
 
+	if (take_lock()) return EXIT_FAILURE;	/* before the driver swap: a refused run changes nothing */
 	if (do_rebind) {
 		atexit(restore_driver);
 		signal(SIGINT, on_signal); signal(SIGTERM, on_signal); signal(SIGHUP, on_signal);

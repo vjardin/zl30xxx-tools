@@ -1,3 +1,7 @@
+% ZL3073X-DUMP(1) zl3073x-dump 1.1.0 | Free Mobile
+% Vincent Jardin <vjardin@free.fr>
+% October 2026
+
 <!--
 SPDX-License-Identifier: AGPL-3.0-or-later
 Copyright 2026 Free Mobile - Vincent Jardin
@@ -7,10 +11,6 @@ Build the man page:
 Preview it:
     pandoc -s -t man zl3073x-dump.1.md | man -l -
 -->
-
-% ZL3073X-DUMP(1) zl3073x-dump 1.0 | Free Mobile
-% Vincent Jardin <vjardin@free.fr>
-% June 2026
 
 # NAME
 

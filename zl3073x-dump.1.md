@@ -39,9 +39,11 @@ The tool reads three things:
   the flash configuration it auto-loaded at power-up.
 
 *The full per-instance configuration.*
-: By **walking the device mailboxes**, every reference (10), DPLL channel (5),
-  synthesizer (5) and output (10) is read and decoded, including the computed
-  output frequency in Hz for references and synths.
+: By **walking the device mailboxes**, every reference (10), DPLL, synthesizer
+  (5) and output (10) is read and decoded, including the computed output
+  frequency in Hz for references and synths. The DPLLs are the part's channels
+  (1 to 5 from the chip ID: ZL30731 to ZL30735; DPLL0, DPLL1 and DPLL2 on a
+  ZL30733) and DPLL5, the NCO-hybrid assist.
 
 *The raw register map.*
 : The live register pages are emitted as a hex `register_map` so a dump can be
@@ -138,10 +140,11 @@ ref (10 instances):
   [ 2] freq_base=10000 freq_mult=12500 ... => 125000000 Hz
   [ 6] freq_base=6400  freq_mult=25177 ... => 161132800 Hz
   ...
-dpll (5 instances):
+dpll (4 instances):
+  [ 0] ...
   [ 1] ref_prio0=255 ref_prio1=16 ... bw_fixed=7 bw_var=129  => loop bandwidth 1.07 Hz (variable)
   [ 2] ref_prio0=15 ref_prio1=255 ... bw_fixed=7 bw_var=79  => loop bandwidth 0.0294 Hz (variable)
-  ...
+  [ 5] ref_prio0=255 ref_prio1=16 ... bw_fixed=7 bw_var=129  => loop bandwidth 1.07 Hz (variable)
 synth (5 instances):
   [ 0] ... => 312500000 Hz
   ...
@@ -153,8 +156,9 @@ register_map (raw hex, 15 pages x 0x7F):
 
 The JSON has the keys `device`, `identity`, `integrity`, `refs`, `dplls`,
 `synths`, `outputs`, and `register_map`. `refs` and `synths` carry a computed
-`freq_hz`; `refs` also carry `enabled`. `dplls` carry the raw `bw_fixed` and
-`bw_var` and the decoded `loop_bw_hz` (`null` for the reserved code) and
+`freq_hz`; `refs` also carry `enabled`. The `index` of a `dplls` entry is the
+DPLL's number: 0, 1, 2 and 5 on a ZL30733. `dplls` carry the raw `bw_fixed`
+and `bw_var` and the decoded `loop_bw_hz` (`null` for the reserved code) and
 `loop_bw_mode` (`fixed`, `variable` or `reserved`). The `integrity` object holds
 `chip_id_ok`, `ready`, `cfg_invalid`, `config_slot`, `stable_cfg_crc32`,
 `whole_map_crc32`, and the byte counts. `register_map` is `{pages, page_bytes,
@@ -196,7 +200,8 @@ mailbox registers `dpll_bw_fixed` (one of six fixed values, or *variable*) and
 1 Hz). ITU-T G.8262.1 requires 1 to 3 Hz for an eEEC; a 1 PPS reference wants
 30 mHz or less.
 A node typically uses one channel for the PTP/SyncE frequency and another for a
-1 PPS/phase plane.
+1 PPS/phase plane. **DPLL5**, the NCO-hybrid assist, drives no synthesizer: a
+channel in NCO-hybrid mode adds the assist's frequency offset to its own.
 
 This tool reports the **static configuration** — *what the DPLL is set up to do*.
 The **live lock state** — which reference is currently selected, whether the

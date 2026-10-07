@@ -60,7 +60,9 @@ static int	reread_ms	= 300;
 static bool	do_rebind	= true;
 static bool	keep_spidev	= false;
 static int	spi_fd		= -1;
-static bool	unbound		= false, spidev_bound = false;
+static bool	unbound		= false;
+static bool	spidev_bound = false;
+static bool	override_set = false;
 
 /** @brief Snapshot of the live register pages (offsets 0x00..0x7E per page).
  *  Filled by the CRC sampling in main(); reused by the emitters as the raw
@@ -85,9 +87,12 @@ static void restore_driver(void)
 		sysfs_write("/sys/bus/spi/drivers/spidev/unbind", spidev_name);
 		spidev_bound = false;
 	}
-	if (unbound) {
+	if (override_set) {
 		snprintf(p, sizeof(p), "/sys/bus/spi/devices/%s/driver_override", spidev_name);
 		sysfs_write(p, "\n");
+		override_set = false;
+	}
+	if (unbound) {
 		snprintf(p, sizeof(p), "/sys/bus/spi/drivers/%s/bind", dpll_driver);
 		sysfs_write(p, spidev_name);
 		unbound = false;
@@ -95,20 +100,33 @@ static void restore_driver(void)
 }
 static void on_signal(int sig) { restore_driver(); _exit(128 + sig); }
 
+static bool bound_to_spidev(void)
+{
+	char p[160], l[256];
+	snprintf(p, sizeof(p), "/sys/bus/spi/devices/%s/driver", spidev_name);
+	ssize_t r = readlink(p, l, sizeof(l) - 1);
+	if (r <= 0) return false;
+	l[r] = '\0';
+	const char *s = strrchr(l, '/');
+	return !strcmp(s ? s + 1 : l, "spidev");
+}
+
 static int grab_spidev(void)
 {
 	char p[160];
 	int rc;
+	if (bound_to_spidev()) return 0;	/* spidev already (device tree): nothing to swap */
 	snprintf(p, sizeof(p), "/sys/bus/spi/drivers/%s/unbind", dpll_driver);
 	rc = sysfs_write(p, spidev_name);
 	if (rc && rc != -ENOENT) warnx("unbind %s: %s", dpll_driver, strerror(-rc));
-	unbound = true;
+	unbound = (rc == 0);
 	snprintf(p, sizeof(p), "/sys/bus/spi/devices/%s/driver_override", spidev_name);
 	rc = sysfs_write(p, "spidev");
 	if (rc) { warnx("driver_override: %s", strerror(-rc)); return rc; }
+	override_set = true;
 	rc = sysfs_write("/sys/bus/spi/drivers/spidev/bind", spidev_name);
 	if (rc && rc != -EEXIST && rc != -EBUSY) { warnx("bind spidev: %s", strerror(-rc)); return rc; }
-	spidev_bound = true;
+	spidev_bound = (rc == 0);
 	return 0;
 }
 static int take_lock(void)

@@ -73,6 +73,12 @@ error, and on **SIGINT**/**SIGTERM**/**SIGHUP**. The DPLL output clocks keep
 running throughout (the configuration lives in the device, not the driver), but
 the kernel dpll/devlink objects briefly disappear and reappear.
 
+When the device is bound to **spidev** already (a device tree that gives the
+ZL3073x to a userspace PTP daemon), the tool reads it as it is and changes no
+binding. In every case it puts back only what it changed. The lock file (see
+**FILES**) is taken before any of this: a run refused for the lock changes
+nothing.
+
 > **Note.** The kernel driver's *probe* writes a few registers, so each rebind
 > perturbs the device state slightly. For a byte- or CRC-stable golden compare,
 > read back-to-back with **-k** then **-n** (see **INTEGRITY CHECKING**).
@@ -355,6 +361,7 @@ There are two integrity signals, of different strength:
 :   Lock file to be shared with any PTP daemon's SPI dev layer.
     A ZL3073x access is a page select followed by a data transfer, so another
     process moving the page in between lands the data in another register.
+    The tool takes it first, before any driver change.
 
 # NOTES
 

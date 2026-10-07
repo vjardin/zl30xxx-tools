@@ -19,7 +19,7 @@ zl3073x-dump — dump, decode and integrity-check a Microchip ZL3073x DPLL / net
 # SYNOPSIS
 
 **zl3073x-dump** \[**-o** _text_] \[**-j** _json_] \[**-d** _spiB.C_] \[**-D** _driver_]
-\[**-s** _hz_] \[**-p** _pages_] \[**-r** _passes_] \[**-w** _ms_] \[**-n**] \[**-k**] \[**-h**]
+\[**-s** _hz_] \[**-p** _pages_] \[**-r** _passes_] \[**-w** _ms_] \[**-n**] \[**-k**] \[**-F**] \[**-h**]
 
 # DESCRIPTION
 
@@ -115,6 +115,12 @@ the kernel dpll/devlink objects briefly disappear and reappear.
     take a golden capture that a following **-n** run can compare against without
     an intervening driver re-probe.
 
+`-F`
+:   Run even while another process holds the chip's lock file (see **FILES**).
+    With **-F** each register access (page select + data transfer) is serialized,
+    but 3rd parties multi-access mailbox sequences can interleave with
+    ours: use it only for a read-only look on a live system.
+
 `-h`
 :   Print a short usage summary.
 
@@ -156,7 +162,8 @@ hex[]}` with one lowercase-hex string per page (254 chars = 127 bytes).
 
 **1**
 :   A read failed, or the device is present but the integrity verdict failed
-    (wrong chip ID, not ready, or `cfg_invalid` set).
+    (wrong chip ID, not ready, or `cfg_invalid` set), or another process holds
+    the chip's lock and **-F** was not given.
 
 **2**
 :   Command-line / usage error.
@@ -310,6 +317,11 @@ There are two integrity signals, of different strength:
 `/sys/bus/spi/drivers/zl3073x-spi/{bind,unbind}`, `/sys/bus/spi/drivers/spidev/{bind,unbind}`, `/sys/bus/spi/devices/spiB.C/driver_override`
 :   The sysfs entries used to swap the SPI device between the DPLL driver and
     spidev.
+
+`/var/lock/zl3073x-spidev.lock` (fallback `/tmp/zl3073x-spidev.lock`)
+:   Lock file to be shared with any PTP daemon's SPI dev layer.
+    A ZL3073x access is a page select followed by a data transfer, so another
+    process moving the page in between lands the data in another register.
 
 # NOTES
 

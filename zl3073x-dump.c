@@ -45,9 +45,11 @@ static bool	force_lock	= false;
 #define ZL_MB_SEM_RD	0x02u		/* BIT(1) - trigger window read */
 
 #define NUM_REFS	10
-#define NUM_DPLLS	5
+#define DPLL_ASSIST	5	/* the NCO-hybrid assist DPLL, on every part */
+#define NUM_DPLLS	(DPLL_ASSIST + 1)	/* DPLL mailbox slots: DPLL0..DPLL5 */
 #define NUM_SYNTHS	5
 #define NUM_OUTS	10
+_Static_assert(NUM_DPLLS <= NUM_OUTS, "mbval[][NUM_OUTS] holds every DPLL slot");
 
 static char	spidev_name[32]	= "spi0.0";
 static char	dpll_driver[32]	= "zl3073x-spi";
@@ -263,6 +265,27 @@ static int mb_read(int t, int inst)
 	return 0;
 }
 
+static unsigned dpll_present = (1u << NUM_DPLLS) - 1;
+
+static unsigned dpll_mask(uint16_t id)
+{
+	unsigned part = id & 0x0FFFu;
+
+	if (part < 0x0E93u || part > 0x0E97u)	/* not a ZL3073x chip ID: every slot */
+		return (1u << NUM_DPLLS) - 1;
+	return ((1u << (part - 0x0E92u)) - 1) | (1u << DPLL_ASSIST);
+}
+static bool mb_present(int t, int inst)
+{
+	return t != 1 || (dpll_present >> inst & 1);	/* MB[1]: dpll */
+}
+static int mb_count(int t)
+{
+	int n = 0;
+	for (int i = 0; i < MB[t].count; i++) n += mb_present(t, i);
+	return n;
+}
+
 struct id_blk {
 	uint8_t info, rev, mcs;
 	uint16_t id; uint8_t fw[6]; uint32_t cfgver; uint16_t gpio;
@@ -316,8 +339,9 @@ static void emit_text(FILE *o, const struct id_blk *b, uint32_t scrc, uint32_t w
 
 	for (int t = 0; t < NMB; t++) {
 		const struct mbtype *m = &MB[t];
-		fprintf(o, "\n%s (%d instances):\n", m->name, m->count);
+		fprintf(o, "\n%s (%d instances):\n", m->name, mb_count(t));
 		for (int i = 0; i < m->count; i++) {
+			if (!mb_present(t, i)) continue;
 			fprintf(o, "  [%2d]", i);
 			for (int k = 0; k < m->nf; k++)
 				fprintf(o, " %s=%llu", fld(t, k), (unsigned long long)mbval[t][i][k]);
@@ -372,6 +396,7 @@ static void emit_json(FILE *o, const struct id_blk *b, uint32_t scrc, uint32_t w
 		const struct mbtype *m = &MB[t];
 		fprintf(o, "  \"%ss\": [\n", m->name);
 		for (int i = 0; i < m->count; i++) {
+			if (!mb_present(t, i)) continue;
 			fprintf(o, "    {\"index\":%d", i);
 			for (int k = 0; k < m->nf; k++)
 				fprintf(o, ",\"%s\":%llu", fld(t, k), (unsigned long long)mbval[t][i][k]);
@@ -455,11 +480,13 @@ int main(int argc, char **argv)
 
 	struct id_blk idb;
 	if (read_id(&idb)) errx(EXIT_FAILURE, "identity read failed");
+	dpll_present = dpll_mask(idb.id);
 
-	/* mailbox walk: every ref / dpll / synth / output */
+	/* mailbox walk: every ref / dpll / synth / output, the DPLLs this part has */
 	for (int t = 0; t < NMB; t++)
 		for (int i = 0; i < MB[t].count; i++)
-			if (mb_read(t, i)) errx(EXIT_FAILURE, "mailbox %s[%d] read failed", MB[t].name, i);
+			if (mb_present(t, i) && mb_read(t, i))
+				errx(EXIT_FAILURE, "mailbox %s[%d] read failed", MB[t].name, i);
 
 	/* stable-config CRC over the register pages (excludes live-status bytes) */
 	static uint8_t volm[15][0x80];

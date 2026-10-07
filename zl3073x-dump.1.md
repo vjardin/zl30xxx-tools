@@ -138,6 +138,10 @@ ref (10 instances):
   [ 2] freq_base=10000 freq_mult=12500 ... => 125000000 Hz
   [ 6] freq_base=6400  freq_mult=25177 ... => 161132800 Hz
   ...
+dpll (5 instances):
+  [ 1] ref_prio0=255 ref_prio1=16 ... bw_fixed=7 bw_var=129  => loop bandwidth 1.07 Hz (variable)
+  [ 2] ref_prio0=15 ref_prio1=255 ... bw_fixed=7 bw_var=79  => loop bandwidth 0.0294 Hz (variable)
+  ...
 synth (5 instances):
   [ 0] ... => 312500000 Hz
   ...
@@ -149,7 +153,9 @@ register_map (raw hex, 15 pages x 0x7F):
 
 The JSON has the keys `device`, `identity`, `integrity`, `refs`, `dplls`,
 `synths`, `outputs`, and `register_map`. `refs` and `synths` carry a computed
-`freq_hz`; `refs` also carry `enabled`. The `integrity` object holds
+`freq_hz`; `refs` also carry `enabled`. `dplls` carry the raw `bw_fixed` and
+`bw_var` and the decoded `loop_bw_hz` (`null` for the reserved code) and
+`loop_bw_mode` (`fixed`, `variable` or `reserved`). The `integrity` object holds
 `chip_id_ok`, `ready`, `cfg_invalid`, `config_slot`, `stable_cfg_crc32`,
 `whole_map_crc32`, and the byte counts. `register_map` is `{pages, page_bytes,
 hex[]}` with one lowercase-hex string per page (254 chars = 127 bytes).
@@ -183,6 +189,12 @@ chooses among the enabled refs at run time by priority.
 **DPLL channels** (`dplls`) — the loop filters. Each channel locks to one ref
 (chosen by the per-ref priority table `ref_prio0..4`), filters its jitter and
 wander, and on reference loss enters **holdover** on the last good frequency.
+Its **loop bandwidth** sets that filter: the channel follows the reference's
+variations below it and filters out the faster ones. It is read from the
+mailbox registers `dpll_bw_fixed` (one of six fixed values, or *variable*) and
+`dpll_bw_var` (*variable*: bandwidth = 10^(bw_var/32) × 10^-4 Hz, so 0x80 is
+1 Hz). ITU-T G.8262.1 requires 1 to 3 Hz for an eEEC; a 1 PPS reference wants
+30 mHz or less.
 A node typically uses one channel for the PTP/SyncE frequency and another for a
 1 PPS/phase plane.
 

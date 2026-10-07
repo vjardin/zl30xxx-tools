@@ -58,6 +58,7 @@ man: $(MANPAGES)
 # The stem is the same for both the underscore and the hyphen binaries.
 zl30733_id:   zl30733_id.c
 zl3073x-dump: zl3073x-dump.c
+zl3073x-dump: LDLIBS += -lm
 
 $(PROGS):
 	@echo "  CCLD    $@"

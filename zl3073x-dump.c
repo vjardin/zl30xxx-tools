@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <math.h>
 #include <stdbool.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -223,10 +224,13 @@ static const struct field out_f[] = {		/* page 14 window */
 	{"mode",0x05,1}, {"div",0x0c,4}, {"width",0x10,4}, {"esync_period",0x14,4},
 	{"esync_width",0x18,4}, {"phase_comp",0x20,4},
 };
-static const struct field dpll_f[] = {		/* page 12 window: ref_prio[0..4] */
+static const struct field dpll_f[] = {		/* page 12 window */
 	{"ref_prio0",0x52,1}, {"ref_prio1",0x53,1}, {"ref_prio2",0x54,1},
 	{"ref_prio3",0x55,1}, {"ref_prio4",0x56,1},
+	{"bw_fixed",0x20,1}, {"bw_var",0x21,1},
 };
+#define DPLL_F_BW_FIXED	5	/* indexes in dpll_f[] */
+#define DPLL_F_BW_VAR	6
 static const struct mbtype MB[] = {
 	{"ref",    10, 0x04, 0x02, NUM_REFS,   ref_f,   sizeof(ref_f)/sizeof(ref_f[0])},
 	{"dpll",   12, 0x04, 0x02, NUM_DPLLS,  dpll_f,  sizeof(dpll_f)/sizeof(dpll_f[0])},
@@ -277,6 +281,27 @@ static int read_id(struct id_blk *b)
 
 static const char *fld(int t, int k) { return MB[t].f[k].name; }
 
+static double dpll_bw_hz(uint64_t bw_fixed, uint64_t bw_var)
+{
+	static const double fixed_hz[] = { 14, 29, 61, 141, 403, 470 };
+	unsigned int code = bw_fixed & 0x7;
+
+	if (code < 6)
+		return fixed_hz[code];
+	if (code == 7)
+		return pow(10.0, (double)(bw_var & 0xff) / 32.0) * 1e-4;
+	return -1.0;
+}
+
+static const char *dpll_bw_mode(uint64_t bw_fixed)
+{
+	switch (bw_fixed & 0x7) {
+	case 6: return "reserved";
+	case 7: return "variable";
+	default: return "fixed";
+	}
+}
+
 static void emit_text(FILE *o, const struct id_blk *b, uint32_t scrc, uint32_t wcrc,
 		      int stable, int total, int nvol)
 {
@@ -302,6 +327,13 @@ static void emit_text(FILE *o, const struct id_blk *b, uint32_t scrc, uint32_t w
 				fprintf(o, "  => %llu Hz%s",
 					(unsigned long long)(mbval[t][i][0] * mbval[t][i][1] * mbval[t][i][2] / n),
 					(mbval[t][i][4] & 1) ? "" : " (disabled)");
+			} else if (t == 1) {	/* dpll: loop bandwidth */
+				uint64_t f = mbval[t][i][DPLL_F_BW_FIXED];
+				double bw = dpll_bw_hz(f, mbval[t][i][DPLL_F_BW_VAR]);
+				if (bw < 0)
+					fprintf(o, "  => loop bandwidth: reserved code 6");
+				else
+					fprintf(o, "  => loop bandwidth %.3g Hz (%s)", bw, dpll_bw_mode(f));
 			} else if (t == 2) {	/* synth: base*mult*m/n Hz */
 				uint64_t n = mbval[t][i][3] ? mbval[t][i][3] : 1;
 				fprintf(o, "  => %llu Hz",
@@ -349,6 +381,15 @@ static void emit_json(FILE *o, const struct id_blk *b, uint32_t scrc, uint32_t w
 					(unsigned long long)(mbval[t][i][0] * mbval[t][i][1] * mbval[t][i][2] / n));
 			}
 			if (t == 0) fprintf(o, ",\"enabled\":%s", (mbval[t][i][4] & 1) ? "true" : "false");
+			if (t == 1) {
+				uint64_t f = mbval[t][i][DPLL_F_BW_FIXED];
+				double bw = dpll_bw_hz(f, mbval[t][i][DPLL_F_BW_VAR]);
+				if (bw < 0)
+					fprintf(o, ",\"loop_bw_hz\":null");
+				else
+					fprintf(o, ",\"loop_bw_hz\":%.6g", bw);
+				fprintf(o, ",\"loop_bw_mode\":\"%s\"", dpll_bw_mode(f));
+			}
 			fprintf(o, "}%s\n", i + 1 < m->count ? "," : "");
 		}
 		fprintf(o, "  ],\n");

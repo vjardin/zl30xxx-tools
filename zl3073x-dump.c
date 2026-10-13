@@ -62,6 +62,7 @@ static int	spi_fd		= -1;
 static bool	unbound		= false;
 static bool	spidev_bound = false;
 static bool	override_set = false;
+static char	*override_prev;		/* driver_override before the run, NULL if none */
 
 /** @brief Snapshot of the live register pages (offsets 0x00..0x7E per page).
  *  Filled by the CRC sampling in main(); reused by the emitters as the raw
@@ -77,6 +78,18 @@ static int sysfs_write(const char *path, const char *val)
 	close(fd);
 	return e;
 }
+static char *sysfs_read(const char *path)
+{
+	FILE *f = fopen(path, "r");
+	char *line = NULL;
+	size_t cap = 0;
+	if (!f) return NULL;
+	ssize_t n = getline(&line, &cap, f);
+	fclose(f);
+	if (n < 0) { free(line); return NULL; }
+	line[strcspn(line, "\n")] = '\0';
+	return line;
+}
 static void restore_driver(void)
 {
 	char p[160];
@@ -88,7 +101,7 @@ static void restore_driver(void)
 	}
 	if (override_set) {
 		snprintf(p, sizeof(p), "/sys/bus/spi/devices/%s/driver_override", spidev_name);
-		sysfs_write(p, "\n");
+		sysfs_write(p, override_prev ? override_prev : "\n");
 		override_set = false;
 	}
 	if (unbound) {
@@ -120,9 +133,17 @@ static int grab_spidev(void)
 	if (rc && rc != -ENOENT) warnx("unbind %s: %s", dpll_driver, strerror(-rc));
 	unbound = (rc == 0);
 	snprintf(p, sizeof(p), "/sys/bus/spi/devices/%s/driver_override", spidev_name);
-	rc = sysfs_write(p, "spidev");
-	if (rc) { warnx("driver_override: %s", strerror(-rc)); return rc; }
-	override_set = true;
+	/* keep an override set before the run: restore it, or leave it if spidev */
+	override_prev = sysfs_read(p);
+	if (override_prev && (!override_prev[0] || !strcmp(override_prev, "(null)"))) {
+		free(override_prev);	/* none: older kernels show it as (null) */
+		override_prev = NULL;
+	}
+	if (!override_prev || strcmp(override_prev, "spidev")) {
+		rc = sysfs_write(p, "spidev");
+		if (rc) { warnx("driver_override: %s", strerror(-rc)); return rc; }
+		override_set = true;
+	}
 	rc = sysfs_write("/sys/bus/spi/drivers/spidev/bind", spidev_name);
 	if (rc && rc != -EEXIST && rc != -EBUSY) { warnx("bind spidev: %s", strerror(-rc)); return rc; }
 	spidev_bound = (rc == 0);

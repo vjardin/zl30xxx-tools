@@ -164,7 +164,9 @@ register_map (raw hex, 15 pages x 0x7F):
 ## JSON object
 
 The JSON has the keys `device`, `identity`, `integrity`, `refs`, `dplls`,
-`synths`, `outputs`, and `register_map`. `refs` and `synths` carry a computed
+`synths`, `outputs`, and `register_map`. `identity.part` names the part from
+the chip ID (`ZL30733`; `unknown` for a chip ID the tool does not know).
+`refs` and `synths` carry a computed
 `freq_hz`; `refs` also carry `enabled`. The `index` of a `dplls` entry is the
 DPLL's number: 0, 1, 2 and 5 on a ZL30733. `dplls` carry the raw `bw_fixed`
 and `bw_var` and the decoded `loop_bw_hz` (`null` for the reserved code) and
@@ -182,7 +184,7 @@ hex[]}` with one lowercase-hex string per page (254 chars = 127 bytes).
 
 **1**
 :   A read failed, or the device is present but the integrity verdict failed
-    (wrong chip ID, not ready, or `cfg_invalid` set), or another process holds
+    (unknown chip ID, not ready, or `cfg_invalid` set), or another process holds
     the chip's lock and **-F** was not given.
 
 **2**
@@ -233,7 +235,7 @@ zl3073x-dump >/run/dpll-config.txt && ptp4l -f /etc/ptp4l.conf -i eth0 &
 ```
 
 The exit status gates the launch: a corrupted or unprogrammed flash
-(`cfg_invalid` set, or wrong chip ID) returns non-zero and PTP is not started.
+(`cfg_invalid` set, or an unknown chip ID) returns non-zero and PTP is not started.
 
 ## Capture a golden reference on a known-good unit
 

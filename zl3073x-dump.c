@@ -41,7 +41,6 @@
 #define ZL_LOCK_FILE2	"/tmp/zl3073x-spidev.lock"
 static int	lock_fd		= -1;
 static bool	force_lock	= false;
-#define ZL_EXPECT_ID	0x0E95u
 #define ZL_MB_SEM_RD	0x02u		/* BIT(1) - trigger window read */
 
 #define NUM_REFS	10
@@ -301,15 +300,29 @@ static int mb_read(int t, int inst)
 	return 0;
 }
 
+struct part { uint16_t id; uint8_t channels; const char *name; };
+static const struct part PARTS[] = {
+	{0x0E93, 1, "ZL30731"}, {0x1E93, 1, "ZL30731"}, {0x2E93, 1, "ZL30731"},
+	{0x0E94, 2, "ZL30732"}, {0x1E94, 2, "ZL30732"}, {0x2E94, 2, "ZL30732"},
+	{0x0E95, 3, "ZL30733"}, {0x1E95, 3, "ZL30733"}, {0x2E95, 3, "ZL30733"},
+	{0x0E96, 4, "ZL30734"}, {0x1E96, 4, "ZL30734"}, {0x2E96, 4, "ZL30734"},
+	{0x0E97, 5, "ZL30735"}, {0x1E97, 5, "ZL30735"}, {0x2E97, 5, "ZL30735"},
+	{0x0E3B, 3, "ZL30643"},
+	{0x0E30, 2, "ZL3073x"}, {0x1F60, 2, "ZL3073x"}, {0x3FC4, 2, "ZL3073x"},
+};
+static const struct part *part_lookup(uint16_t id)
+{
+	for (size_t i = 0; i < sizeof(PARTS)/sizeof(PARTS[0]); i++)
+		if (PARTS[i].id == id) return &PARTS[i];
+	return NULL;
+}
+
 static unsigned dpll_present = (1u << NUM_DPLLS) - 1;
 
-static unsigned dpll_mask(uint16_t id)
+static unsigned dpll_mask(const struct part *p)
 {
-	unsigned part = id & 0x0FFFu;
-
-	if (part < 0x0E93u || part > 0x0E97u)	/* not a ZL3073x chip ID: every slot */
-		return (1u << NUM_DPLLS) - 1;
-	return ((1u << (part - 0x0E92u)) - 1) | (1u << DPLL_ASSIST);
+	if (!p) return (1u << NUM_DPLLS) - 1;	/* unknown chip ID: every slot */
+	return ((1u << p->channels) - 1) | (1u << DPLL_ASSIST);
 }
 static bool mb_present(int t, int inst)
 {
@@ -325,6 +338,7 @@ static int mb_count(int t)
 struct id_blk {
 	uint8_t info, rev, mcs;
 	uint16_t id; uint8_t fw[6]; uint32_t cfgver; uint16_t gpio;
+	const struct part *part;	/* NULL: a chip ID the tool does not know */
 	bool id_ok, ready, cfg_invalid;
 };
 static int read_id(struct id_blk *b)
@@ -334,7 +348,8 @@ static int read_id(struct id_blk *b)
 	    zl_rd(0x05, b->fw, 6) || zl_rd(0x07, cv, 4) || zl_rd(0x19, gp, 2) || zl_rd(0x32, &b->mcs, 1))
 		return -1;
 	b->id = be(id2, 2); b->cfgver = be(cv, 4); b->gpio = be(gp, 2);
-	b->id_ok = (b->id == ZL_EXPECT_ID); b->ready = b->info & 0x80; b->cfg_invalid = b->mcs & 0x04;
+	b->part = part_lookup(b->id); b->id_ok = b->part != NULL;
+	b->ready = b->info & 0x80; b->cfg_invalid = b->mcs & 0x04;
 	return 0;
 }
 
@@ -365,8 +380,8 @@ static void emit_text(FILE *o, const struct id_blk *b, uint32_t scrc, uint32_t w
 		      int stable, int total, int nvol)
 {
 	fprintf(o, "ZL3073x DPLL config dump (%s)\n", spidev_name);
-	fprintf(o, "  id 0x%04x %s  rev 0x%02x  fw %02x%02x  custom_config_ver 0x%08x%s\n",
-		b->id, b->id_ok ? "(ZL30733)" : "(UNEXPECTED!)", b->rev, b->fw[0], b->fw[1],
+	fprintf(o, "  id 0x%04x (%s)  rev 0x%02x  fw %02x%02x  custom_config_ver 0x%08x%s\n",
+		b->id, b->part ? b->part->name : "UNEXPECTED!", b->rev, b->fw[0], b->fw[1],
 		b->cfgver, b->cfgver == 0xffffffff ? " (BLANK)" : "");
 	fprintf(o, "  ready=%d  cfg_invalid=%d  booted config slot AC=%u\n",
 		b->ready, b->cfg_invalid, b->gpio & 0x7);
@@ -422,7 +437,7 @@ static void emit_json(FILE *o, const struct id_blk *b, uint32_t scrc, uint32_t w
 	fprintf(o, "  \"device\": \"%s\",\n", spidev_name);
 	fprintf(o, "  \"identity\": {\"id\":\"0x%04x\",\"part\":\"%s\",\"revision\":\"0x%02x\","
 		"\"fw_ver\":\"0x%02x%02x\",\"custom_config_ver\":\"0x%08x\",\"config_blank\":%s},\n",
-		b->id, b->id_ok ? "ZL30733" : "unknown", b->rev, b->fw[0], b->fw[1], b->cfgver,
+		b->id, b->part ? b->part->name : "unknown", b->rev, b->fw[0], b->fw[1], b->cfgver,
 		b->cfgver == 0xffffffff ? "true" : "false");
 	fprintf(o, "  \"integrity\": {\"chip_id_ok\":%s,\"ready\":%s,\"cfg_invalid\":%s,"
 		"\"config_slot\":%u,\"stable_cfg_crc32\":\"0x%08x\",\"whole_map_crc32\":\"0x%08x\","
@@ -521,7 +536,7 @@ int main(int argc, char **argv)
 
 	struct id_blk idb;
 	if (read_id(&idb)) errx(EXIT_FAILURE, "identity read failed");
-	dpll_present = dpll_mask(idb.id);
+	dpll_present = dpll_mask(idb.part);
 
 	/* mailbox walk: every ref / dpll / synth / output, the DPLLs this part has */
 	for (int t = 0; t < NMB; t++)

@@ -329,7 +329,8 @@ There are two integrity signals, of different strength:
 
 **Strong / content — `stable_cfg_crc32`, `mailbox_cfg_crc32` and `register_map`.**
 : `stable_cfg_crc32` is a CRC over the directly addressed configuration
-  registers (free-running status bytes excluded). It leaves out the four
+  registers (free-running status bytes excluded, synthesizer, output phase-step
+  registers, which keep the last step a host requested). It leaves out the four
   mailbox pages (reference, DPLL, synthesizer and output windows), because a
   window shows whichever instance was read last. So we are missing the
   per-instance configuration: reference frequencies and monitors, DPLL

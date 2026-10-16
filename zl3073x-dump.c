@@ -584,6 +584,7 @@ int main(int argc, char **argv)
 	for (int pg = 6; pg <= 7 && pg < npages; pg++) memset(volm[pg], 1, 0x7F);
 	for (int pg = 10; pg < npages; pg++) if (pg != 11) memset(volm[pg], 1, 0x7F);
 	if (npages > 9) for (int off = 0x1E; off <= 0x26; off++) volm[9][off] = 1;
+	if (npages > 9) for (int off = 0x38; off <= 0x3F; off++) volm[9][off] = 1;
 	uint32_t wcrc = 0, scrc = 0;
 	int stable = 0, total = 0, nvol = 0;
 	for (int pg = 0; pg < npages; pg++) {

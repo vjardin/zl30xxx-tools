@@ -157,6 +157,9 @@ dpll (4 instances):
 synth (5 instances):
   [ 0] ... => 312500000 Hz
   ...
+mailbox_windows (raw hex, offsets 0x05..last of each instance):
+  ref[0]     05: 27 10 03 e8 00 01 00 01 41 ...
+  ...
 register_map (raw hex, 15 pages x 0x7F):
   0000: a1 0e 95 03 00 17 8a ff ...
 ```
@@ -170,7 +173,11 @@ the chip ID (`ZL30733`; `unknown` for a chip ID the tool does not know).
 `freq_hz`; `refs` also carry `enabled`. The `index` of a `dplls` entry is the
 DPLL's number: 0, 1, 2 and 5 on a ZL30733. `dplls` carry the raw `bw_fixed`
 and `bw_var` and the decoded `loop_bw_hz` (`null` for the reserved code) and
-`loop_bw_mode` (`fixed`, `variable` or `reserved`). The `integrity` object holds
+`loop_bw_mode` (`fixed`, `variable` or `reserved`). Every entry of `refs`,
+`dplls`, `synths` and `outputs` carries `window`, the instance's configuration
+bytes as lowercase hex: offset 0x05 to the window's last register, the bytes
+`mailbox_cfg_crc32` covers (the text report prints them under
+`mailbox_windows`). The `integrity` object holds
 `chip_id_ok`, `ready`, `cfg_invalid`, `config_slot`, `stable_cfg_crc32`,
 `whole_map_crc32`, the byte counts, `mailbox_cfg_crc32`, `mailbox_instances`
 and `mailbox_bytes`. `register_map` is `{pages, page_bytes,

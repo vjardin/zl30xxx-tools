@@ -281,6 +281,7 @@ static const struct mbtype MB[] = {
 #define MAXF 8
 
 static uint64_t mbval[NMB][NUM_OUTS][MAXF];	/* [type][instance][field] */
+static uint8_t mbwin[NMB][NUM_OUTS][0x80];	/* [type][instance] window */
 
 #define MB_CFG_FIRST	0x05
 static uint32_t mb_cfg_crc;
@@ -313,7 +314,7 @@ static int mb_read(int t, int inst)
 		if (rd_val((m->page << 7) | m->f[k].off, m->f[k].size, &mbval[t][inst][k]))
 			return -1;
 
-	uint8_t win[0x80];
+	uint8_t *win = mbwin[t][inst];
 	if (read_page(m->page, win)) return -1;
 	mb_cfg_crc = mb_win_crc(mb_cfg_crc, t, inst, win);
 	mb_cfg_instances++;
@@ -441,6 +442,21 @@ static void emit_text(FILE *o, const struct id_blk *b, uint32_t scrc, uint32_t w
 		}
 	}
 
+	fprintf(o, "\nmailbox_windows (raw hex, offsets 0x%02x..last of each instance):\n", MB_CFG_FIRST);
+	for (int t = 0; t < NMB; t++)
+		for (int i = 0; i < MB[t].count; i++) {
+			if (!mb_present(t, i)) continue;
+			for (int off = MB_CFG_FIRST; off <= MB[t].cfg_last; off += 16) {
+				char tag[24] = "";
+				if (off == MB_CFG_FIRST)
+					snprintf(tag, sizeof(tag), "%s[%d]", MB[t].name, i);
+				fprintf(o, "  %-10s %02x:", tag, off);
+				for (int k = off; k < off + 16 && k <= MB[t].cfg_last; k++)
+					fprintf(o, " %02x", mbwin[t][i][k]);
+				fprintf(o, "\n");
+			}
+		}
+
 	fprintf(o, "\nregister_map (raw hex, %d pages x 0x7F):\n", npages);
 	for (int pg = 0; pg < npages; pg++)
 		for (int off = 0; off < 0x7F; off += 16) {
@@ -491,7 +507,10 @@ static void emit_json(FILE *o, const struct id_blk *b, uint32_t scrc, uint32_t w
 					fprintf(o, ",\"loop_bw_hz\":%.6g", bw);
 				fprintf(o, ",\"loop_bw_mode\":\"%s\"", dpll_bw_mode(f));
 			}
-			fprintf(o, "}%s\n", i + 1 < m->count ? "," : "");
+			fprintf(o, ",\"window\":\"");
+			for (int k = MB_CFG_FIRST; k <= m->cfg_last; k++)
+				fprintf(o, "%02x", mbwin[t][i][k]);
+			fprintf(o, "\"}%s\n", i + 1 < m->count ? "," : "");
 		}
 		fprintf(o, "  ],\n");
 	}

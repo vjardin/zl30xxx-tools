@@ -1,4 +1,4 @@
-% ZL3073X-DUMP(1) zl3073x-dump 1.2.0 | Free Mobile
+% ZL3073X-DUMP(1) zl3073x-dump 1.3.0 | Free Mobile
 % Vincent Jardin <vjardin@free.fr>
 % October 2026
 
